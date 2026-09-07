@@ -108,24 +108,7 @@ const processNextItem = async (index, currentQueue) => {
     }
   };
 };
-
-    const handleSave = async () => {
-        if (!parsedData) return;
-        try {
-            const { error: insertError } = await supabase
-                .from("businesscards")
-                .insert([parsedData]);
-            if (insertError) throw insertError;
-            alert("Card saved!");
-            if (image) URL.revokeObjectURL(image);
-            setParsedData(null);
-            setImage(null);
-            fetchCards();
-        } catch (err) {
-            setError(`Save failed: ${err.message}`);
-        }
-    };
-
+  
 const handleBulkSave = async () => {
   if (pendingReviewCards.length === 0) return;
   try {
@@ -211,6 +194,37 @@ const handleRemovePendingCard = (id) => {
     card.email?.toLowerCase().includes(searchTerm.toLowerCase())
     );
    
+    const exportToCSV = () => {
+  // 1. Define the spreadsheet columns
+  const headers = ['Name', 'Title', 'Company', 'Phone', 'Email', 'Notes', 'Date Added'];
+  
+  // 2. Convert your saved cards into text rows
+  const rows = cards.map(card => [
+    `"${(card.name || '').replace(/"/g, '""')}"`,
+    `"${(card.title || '').replace(/"/g, '""')}"`,
+    `"${(card.company || '').replace(/"/g, '""')}"`,
+    `"${(card.phone || '').replace(/"/g, '""')}"`,
+    `"${(card.email || '').replace(/"/g, '""')}"`,
+    `"${(card.notes || '').replace(/"/g, '""')}"`,
+    `"${card.created_at ? new Date(card.created_at).toLocaleDateString() : '-'}"`
+  ]);
+
+  // 3. Join everything together with commas and clean line breaks
+  const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+
+  // 4. Create a hidden browser link to trigger the download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `business_cards_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+
     return (
     <div className="container">
         <h1>Business Card Scanner</h1>
@@ -281,7 +295,20 @@ const handleRemovePendingCard = (id) => {
 
         {/* Master Output Section */}
         <div className="cards-section">
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            
             <h2>Saved Cards ({cards.length})</h2>
+  
+            <button 
+                onClick={exportToCSV} 
+                style={{ background: '#28a745', color: 'white', padding: '10px 18px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                disabled={cards.length === 0} // Button stays locked if the database is empty
+            >
+            📥 Export to CSV
+            </button>
+            
+            </div>
             
             <div className="search-section">
                 <input
