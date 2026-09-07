@@ -16,92 +16,98 @@ function toTitleCase(str) {
 }
 
 export default function App() {
-    const [image, setImage] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [parsedData, setParsedData] = useState(null);
+    const [uploadQueue, setUploadQueue] = useState([]);       
+    const [currentProcessingIndex, setCurrentProcessingIndex] = useState(-1); 
+    const [pendingReviewCards, setPendingReviewCards] = useState([]); 
     const [cards, setCards] = useState([]);
     const [error, setError] = useState(null);
     const [editingId, setEditingId] = useState(null);
     const [editData, setEditData] = useState({});
     const [searchTerm, setSearchTerm] = useState('');
 
-    const handleImageUpload = async (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
+    const handleImageUpload = (event) => {
+  const files = Array.from(event.target.files);
+  if (files.length === 0) return;
+  setError(null);
 
-        if (image) URL.revokeObjectURL(image);
-        setImage(URL.createObjectURL(file));
-        setLoading(true);
-        setError(null);
+  const newQueueItems = files.map((file) => ({
+    file: file,
+    previewUrl: URL.createObjectURL(file),
+    status: 'Waiting...', 
+  }));
 
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onloadend = async () => {
-            try {
-                const base64DataSegment = reader.result.split(",")[1];
-                const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const updatedQueue = [...uploadQueue, ...newQueueItems];
+  setUploadQueue(updatedQueue);
 
-                if (!apiKey) {
-                    throw new Error("VITE_GEMINI_API_KEY not found in .env.local");
-                }
+  if (currentProcessingIndex === -1) {
+    processNextItem(0, updatedQueue);
+  }
+};
 
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+const processNextItem = async (index, currentQueue) => {
+  if (index >= currentQueue.length) {
+    setCurrentProcessingIndex(-1);
+    return;
+  }
 
-                const response = await fetch(apiUrl, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [
-                                { 
-                                    text: "Extract details from this business card. Return ONLY a raw valid JSON object with no markdown formatting. Schema: { \"name\": \"\", \"title\": \"\", \"company\": \"\", \"phone\": \"\", \"email\": \"\" }" 
-                                },
-                                { 
-                                    inlineData: { 
-                                        mimeType: file.type, 
-                                        data: base64DataSegment 
-                                    } 
-                                }
-                            ]
-                        }]
-                    })
-                });
+  setCurrentProcessingIndex(index);
+  setUploadQueue(prev => prev.map((item, idx) => idx === index ? { ...item, status: 'Processing...' } : item));
 
-                if (!response.ok) {
-                    const textErr = await response.text();
-                    console.error("API Error:", textErr);
-                    throw new Error(`Google API error: ${response.status}`);
-                }
+  const targetItem = currentQueue[index];
+  const file = targetItem.file;
+  const reader = new FileReader();
+  
+  reader.readAsDataURL(file);
+  reader.onloadend = async () => {
+    try {
+      const base64DataSegment = reader.result.split(",")[1];
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("VITE_GEMINI_API_KEY not found in .env.local");
 
-                const resData = await response.json();
-                let aiTextResponse = resData.candidates[0].content.parts[0].text;
-                
-                // Clean markdown if present
-                aiTextResponse = aiTextResponse
-                    .replace(/```json/gi, "")
-                    .replace(/```/g, "")
-                    .trim();
-                
-                console.log("Cleaned AI response:", aiTextResponse); // Debug
-                
-                const parsedJson = JSON.parse(aiTextResponse);
-                setParsedData({
-                    name: toTitleCase(parsedJson.name || ""),
-                    title: parsedJson.title || "",
-                    company: parsedJson.company || "",
-                    phone: parsedJson.phone || "", 
-                    email: (parsedJson.email || "").toLowerCase(), 
-                    notes: ""
-                });
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+      
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: "Extract details from this business card. Return ONLY a raw valid JSON object with no markdown formatting. Schema: { \"name\": \"\", \"title\": \"\", \"company\": \"\", \"phone\": \"\", \"email\": \"\" }" },
+              { inlineData: { mimeType: file.type, data: base64DataSegment } }
+            ]
+          }]
+        })
+      });
 
-            } catch (err) {
-                console.error("Error:", err);
-                setError(`Error: ${err.message}`);
-            } finally {
-                setLoading(false);
-            }
-        };
-    };
+      if (!response.ok) throw new Error(`Google API error status: ${response.status}`);
+      
+      const resData = await response.json();
+      let aiTextResponse = resData.candidates[0].content.parts[0].text;
+      aiTextResponse = aiTextResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const parsedJson = JSON.parse(aiTextResponse);
+      
+      const extractedCard = {
+        id: Date.now() + index, 
+        name: toTitleCase(parsedJson.name || ""),
+        title: toTitleCase(parsedJson.title || ""),
+        company: toTitleCase(parsedJson.company || ""),
+        phone: parsedJson.phone || "",
+        email: (parsedJson.email || "").toLowerCase(),
+        notes: "",
+        previewUrl: targetItem.previewUrl
+      };
+
+      setPendingReviewCards(prev => [...prev, extractedCard]);
+      setUploadQueue(prev => prev.map((item, idx) => idx === index ? { ...item, status: 'Done ✅' } : item));
+    } catch (err) {
+      console.error(err);
+      setUploadQueue(prev => prev.map((item, idx) => idx === index ? { ...item, status: 'Failed ❌' } : item));
+      setError(`Failed to extract a card: ${err.message}`);
+    } finally {
+        processNextItem(index + 1, currentQueue);
+    }
+  };
+};
 
     const handleSave = async () => {
         if (!parsedData) return;
@@ -119,6 +125,33 @@ export default function App() {
             setError(`Save failed: ${err.message}`);
         }
     };
+
+const handleBulkSave = async () => {
+  if (pendingReviewCards.length === 0) return;
+  try {
+    // Remove the temporary local preview image strings right before database insertion
+    const cardsToSave = pendingReviewCards.map(({ id, previewUrl, ...rest }) => rest);
+    
+    const { error: insertError } = await supabase
+      .from("businesscards")
+      .insert(cardsToSave);
+      
+    if (insertError) throw insertError;
+    
+    alert(`Successfully saved ${pendingReviewCards.length} cards!`);
+    
+    uploadQueue.forEach(item => URL.revokeObjectURL(item.previewUrl));
+    setPendingReviewCards([]);
+    setUploadQueue([]);
+    fetchCards(); 
+  } catch (err) {
+    setError(`Bulk save failed: ${err.message}`);
+  }
+};
+
+const handleRemovePendingCard = (id) => {
+  setPendingReviewCards(prev => prev.filter(c => c.id !== id));
+};
 
     const fetchCards = async () => {
         try {
@@ -179,136 +212,136 @@ export default function App() {
     );
    
     return (
-        <div className="container">
-            <h1>Business Card Scanner</h1>
-            
-            
-            <div className="upload-section">
+    <div className="container">
+        <h1>Business Card Scanner</h1>
+        
+        {/* Bulk Upload Section */}
+        <div className="upload-section">
+            <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>Upload One or More Business Cards:</label>
             <input
                 type="file"
                 accept="image/*"
                 onChange={handleImageUpload}
-                disabled={loading}
+                multiple 
+                disabled={currentProcessingIndex !== -1}
             />
-            {loading && <p className="loading-text">Processing image with Gemini...</p>}
-            </div>
-
-
-            {image && (
-                <div className="preview-section">
-                    <img src={image} alt="Business Card" className="preview-image" />
-                </div>
-            )}
-
-            {error && <div className="error-box"><p className="error">{error}</p></div>}
-
-            {parsedData && (
-                <div className="parsed-section">
-                    <h2>Extracted Data</h2>
-                    <div className="form">
-                        <label>Name</label>
-                        <input
-                            type="text"
-                            value={parsedData.name}
-                            onChange={(e) => setParsedData({ ...parsedData, name: e.target.value })}
-                        />
-                        <label>Title</label>
-                        <input
-                            type="text"
-                            value={parsedData.title}
-                            onChange={(e) => setParsedData({ ...parsedData, title: e.target.value })}
-                        />
-                        <label>Company</label>
-                        <input
-                            type="text"
-                            value={parsedData.company}
-                            onChange={(e) => setParsedData({ ...parsedData, company: e.target.value })}
-                        />
-                        <label>Phone</label>
-                        <input
-                            type="text"
-                            value={parsedData.phone}
-                            onChange={(e) => setParsedData({ ...parsedData, phone: e.target.value })}
-                        />
-                        <label>Email</label>
-                        <input
-                            type="text"
-                            value={parsedData.email}
-                            onChange={(e) => setParsedData({ ...parsedData, email: e.target.value })}
-                        />
-                        <label>Notes</label>
-                        <textarea
-                            value={parsedData.notes}
-                            onChange={(e) => setParsedData({ ...parsedData, notes: e.target.value })}
-                            placeholder="Where did you meet them? What did you discuss?"
-                        />
-                        <button onClick={handleSave}>Save Card</button>
+            
+            {uploadQueue.length > 0 && (
+                <div style={{ background: '#f0f0f0', padding: '12px', borderRadius: '6px', marginTop: '15px' }}>
+                    <h4>Queue Progress ({uploadQueue.filter(i => i.status === 'Done ✅').length} / {uploadQueue.length} Complete)</h4>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {uploadQueue.map((item, idx) => (
+                            <span key={idx} style={{ 
+                                padding: '4px 8px', 
+                                borderRadius: '4px', 
+                                fontSize: '12px',
+                                background: idx === currentProcessingIndex ? '#ffeeba' : item.status.includes('Done') ? '#d4edda' : '#e2e3e5'
+                            }}>
+                                Card {idx + 1}: {item.status}
+                            </span>
+                        ))}
                     </div>
                 </div>
             )}
-
-            <div className="cards-section">
-  <h2>Saved Cards ({cards.length})</h2>
-  
-  <div className="search-section">
-    <input
-        type="text"
-        placeholder="Search by name, company, or email..."
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-        className="search-input"
-    />
-    <p>{filteredCards.length} of {cards.length} cards found</p>
-    </div>
-  
-  <div className="table-responsive">
-    <table className="cards-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Title</th>
-          <th>Company</th>
-          <th>Phone</th>
-          <th>Email</th>
-          <th>Notes</th>
-        </tr>
-      </thead>
-<tbody>
-  {filteredCards.map((card) => (
-    editingId === card.id ? (
-      <tr key={card.id} className="editing-row">
-        <td><input type="text" value={editData.name || ""} onChange={(e) => setEditData({...editData, name: e.target.value})} /></td>
-        <td><input type="text" value={editData.title || ""} onChange={(e) => setEditData({...editData, title: e.target.value})} /></td>
-        <td><input type="text" value={editData.company || ""} onChange={(e) => setEditData({...editData, company: e.target.value})} /></td>
-        <td><input type="text" value={editData.phone || ""} onChange={(e) => setEditData({...editData, phone: e.target.value})} /></td>
-        <td><input type="text" value={editData.email || ""} onChange={(e) => setEditData({...editData, email: e.target.value})} /></td>
-        <td><input type="text" value={editData.notes || ""} onChange={(e) => setEditData({...editData, notes: e.target.value})} placeholder="Edit notes..." /></td>
-        <td className="action-buttons-cell">
-          <button onClick={handleEditSave} className="save-btn">Save</button>
-          <button onClick={() => setEditingId(null)} className="cancel-btn">Cancel</button>
-          <button onClick={(e) => { 
-            e.stopPropagation(); // Prevents triggering row clicks accidentally
-            handleDelete(card.id); 
-          }} className="delete-btn">Delete</button>
-        </td>
-      </tr>
-    ) : (
-      <tr key={card.id} onClick={() => handleEdit(card)} style={{cursor: 'pointer'}}>
-        <td><strong>{card.name}</strong></td>
-        <td>{card.title}</td>
-        <td>{card.company}</td>
-        <td>{card.phone}</td>
-        <td>{card.email}</td>
-        <td>{card.notes || '-'}</td>
-        <td></td>
-      </tr>
-    )
-  ))}
-</tbody>
-    </table>
-  </div>
-</div>
-
         </div>
-    );
+
+        {/* Batch Review Section */}
+        {pendingReviewCards.length > 0 && (
+            <div className="parsed-section" style={{ border: '2px solid #007bff', background: '#f8f9fa' }}>
+                <h2>📋 Batch Review Panel ({pendingReviewCards.length} Cards Extracted)</h2>
+                <p>Verify or tweak entries below before pushing the batch to your live database.</p>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', margin: '20px 0' }}>
+                    {pendingReviewCards.map((card) => (
+                        <div key={card.id} style={{ display: 'flex', gap: '15px', background: 'white', padding: '15px', borderRadius: '6px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                            <img src={card.previewUrl} alt="Card Preview" style={{ width: '120px', height: '80px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #ccc' }} />
+                            
+                            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                <input type="text" value={card.name} placeholder="Name" onChange={(e) => setPendingReviewCards(prev => prev.map(c => c.id === card.id ? {...c, name: e.target.value} : c))} />
+                                <input type="text" value={card.title} placeholder="Title" onChange={(e) => setPendingReviewCards(prev => prev.map(c => c.id === card.id ? {...c, title: e.target.value} : c))} />
+                                <input type="text" value={card.company} placeholder="Company" onChange={(e) => setPendingReviewCards(prev => prev.map(c => c.id === card.id ? {...c, company: e.target.value} : c))} />
+                                <input type="text" value={card.phone} placeholder="Phone" onChange={(e) => setPendingReviewCards(prev => prev.map(c => c.id === card.id ? {...c, phone: e.target.value} : c))} />
+                                <input type="text" value={card.email} placeholder="Email" style={{ gridColumn: 'span 2' }} onChange={(e) => setPendingReviewCards(prev => prev.map(c => c.id === card.id ? {...c, email: e.target.value} : c))} />
+                                <input type="text" value={card.notes} placeholder="Add notes..." style={{ gridColumn: 'span 2' }} onChange={(e) => setPendingReviewCards(prev => prev.map(c => c.id === card.id ? {...c, notes: e.target.value} : c))} />
+                            </div>
+                            
+                            <button onClick={() => handleRemovePendingCard(card.id)} style={{ background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', width: '35px', height: '35px', cursor: 'pointer', alignSelf: 'center' }}>✕</button>
+                        </div>
+                    ))}
+                </div>
+                
+                <button onClick={handleBulkSave} style={{ background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '18px', padding: '12px 24px', width: '100%' }}>
+                    💾 Save All Verified Cards to Database
+                </button>
+            </div>
+        )}
+        
+        {/* Global Error Banner */}
+        {error && <div className="error-box"><p className="error">{error}</p></div>}
+
+        {/* Master Output Section */}
+        <div className="cards-section">
+            <h2>Saved Cards ({cards.length})</h2>
+            
+            <div className="search-section">
+                <input
+                    type="text"
+                    placeholder="Search by name, company, or email..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="search-input"
+                />
+                <p style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>{filteredCards.length} of {cards.length} cards found</p>
+            </div>
+            
+            <div className="table-responsive">
+                <table className="cards-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Title</th>
+                            <th>Company</th>
+                            <th>Phone</th>
+                            <th>Email</th>
+                            <th>Notes</th>
+                            <th>Actions</th> {/* 🎯 ADDED TO ALIGN WITH BUTTONS TRACK ROW */}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filteredCards.map((card) => (
+                            editingId === card.id ? (
+                                <tr key={card.id} className="editing-row">
+                                    <td><input type="text" value={editData.name || ""} onChange={(e) => setEditData({...editData, name: e.target.value})} /></td>
+                                    <td><input type="text" value={editData.title || ""} onChange={(e) => setEditData({...editData, title: e.target.value})} /></td>
+                                    <td><input type="text" value={editData.company || ""} onChange={(e) => setEditData({...editData, company: e.target.value})} /></td>
+                                    <td><input type="text" value={editData.phone || ""} onChange={(e) => setEditData({...editData, phone: e.target.value})} /></td>
+                                    <td><input type="text" value={editData.email || ""} onChange={(e) => setEditData({...editData, email: e.target.value})} /></td>
+                                    <td><input type="text" value={editData.notes || ""} onChange={(e) => setEditData({...editData, notes: e.target.value})} placeholder="Edit notes..." /></td>
+                                    <td className="action-buttons-cell">
+                                        <button onClick={handleEditSave} className="save-btn">Save</button>
+                                        <button onClick={() => setEditingId(null)} className="cancel-btn">Cancel</button>
+                                        <button onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            handleDelete(card.id); 
+                                        }} className="delete-btn">Delete</button>
+                                    </td>
+                                </tr>
+                            ) : (
+                                <tr key={card.id} onClick={() => handleEdit(card)} style={{cursor: 'pointer'}}>
+                                    <td><strong>{card.name}</strong></td>
+                                    <td>{card.title}</td>
+                                    <td>{card.company}</td>
+                                    <td>{card.phone}</td>
+                                    <td>{card.email}</td>
+                                    <td>{card.notes || '-'}</td>
+                                    <td></td>
+                                </tr>
+                            )
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+);
 }
