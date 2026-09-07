@@ -119,7 +119,10 @@ const handleBulkSave = async () => {
   if (pendingReviewCards.length === 0) return;
   try {
     // Remove the temporary local preview image strings right before database insertion
-    const cardsToSave = pendingReviewCards.map(({ id, previewUrl, ...rest }) => rest);
+    const cardsToSave = pendingReviewCards.map(({ id, previewUrl, ...rest }) => ({
+      ...rest,
+      user_id: session.user.id // 🎯 Stamps your account signature to pass database security walls
+    }));
     
     const { error: insertError } = await supabase
       .from("businesscards")
@@ -304,6 +307,35 @@ const handleAuthAction = async (e) => {
                         <button onClick={() => supabase.auth.signOut()} style={{ background: '#6c757d', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
                             Logout 🚪
                         </button>
+                    </div>
+                 
+                    <div className="upload-section" style={{ marginBottom: '20px' }}>
+                        <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>Upload One or More Business Cards:</label>
+                        <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            multiple 
+                            disabled={currentProcessingIndex !== -1}
+                        />
+                        
+                        {uploadQueue.length > 0 && (
+                            <div style={{ background: '#f0f0f0', padding: '12px', borderRadius: '6px', marginTop: '15px' }}>
+                                <h4>Queue Progress ({uploadQueue.filter(i => i.status === 'Done ✅').length} / {uploadQueue.length} Complete)</h4>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    {uploadQueue.map((item, idx) => (
+                                        <span key={idx} style={{ 
+                                            padding: '4px 8px', 
+                                            borderRadius: '4px', 
+                                            fontSize: '12px',
+                                            background: idx === currentProcessingIndex ? '#ffeeba' : item.status.includes('Done') ? '#d4edda' : '#e2e3e5'
+                                        }}>
+                                            Card {idx + 1}: {item.status}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
         {/* Batch Review Section */}
