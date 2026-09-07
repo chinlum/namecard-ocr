@@ -25,6 +25,12 @@ export default function App() {
     const [editData, setEditData] = useState({});
     const [searchTerm, setSearchTerm] = useState('');
 
+    const [session, setSession] = useState(null);
+    const [authEmail, setAuthEmail] = useState('');
+    const [authPassword, setAuthPassword] = useState('');
+    const [isSignUp, setIsSignUp] = useState(false);
+    const [authLoading, setAuthLoading] = useState(false);
+
     const handleImageUpload = (event) => {
   const files = Array.from(event.target.files);
   if (files.length === 0) return;
@@ -136,6 +142,42 @@ const handleRemovePendingCard = (id) => {
   setPendingReviewCards(prev => prev.filter(c => c.id !== id));
 };
 
+React.useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+        setSession(session);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        setSession(session);
+    });
+    return () => subscription.unsubscribe();
+}, []);
+
+React.useEffect(() => {
+    if (session) {
+        fetchCards();
+    }
+}, [session]);
+
+const handleAuthAction = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setAuthLoading(true);
+    try {
+        if (isSignUp) {
+            const { error: signUpError } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+            if (signUpError) throw signUpError;
+            alert("Registration complete! Check your email inbox for a validation link.");
+        } else {
+            const { error: signInError } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+            if (signInError) throw signInError;
+        }
+    } catch (err) {
+        setError(`Authentication failed: ${err.message}`);
+    } finally {
+        setAuthLoading(false);
+    }
+};
+
     const fetchCards = async () => {
         try {
             const { data, error: fetchError } = await supabase
@@ -226,38 +268,43 @@ const handleRemovePendingCard = (id) => {
 
 
     return (
-    <div className="container">
-        <h1>Business Card Scanner</h1>
-        
-        {/* Bulk Upload Section */}
-        <div className="upload-section">
-            <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>Upload One or More Business Cards:</label>
-            <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                multiple 
-                disabled={currentProcessingIndex !== -1}
-            />
-            
-            {uploadQueue.length > 0 && (
-                <div style={{ background: '#f0f0f0', padding: '12px', borderRadius: '6px', marginTop: '15px' }}>
-                    <h4>Queue Progress ({uploadQueue.filter(i => i.status === 'Done ✅').length} / {uploadQueue.length} Complete)</h4>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {uploadQueue.map((item, idx) => (
-                            <span key={idx} style={{ 
-                                padding: '4px 8px', 
-                                borderRadius: '4px', 
-                                fontSize: '12px',
-                                background: idx === currentProcessingIndex ? '#ffeeba' : item.status.includes('Done') ? '#d4edda' : '#e2e3e5'
-                            }}>
-                                Card {idx + 1}: {item.status}
-                            </span>
-                        ))}
-                    </div>
+        <div className="container">
+            {!session ? (
+                /* 🔐 RENDER THIS CUSTOM LOGIN FORM IF USER IS OUT */
+                <div style={{ maxWidth: '420px', margin: '50px auto', padding: '25px', background: '#fff', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                    <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>
+                        {isSignUp ? '📝 Register New Profile' : '🔐 Business Card Scanner Login'}
+                    </h2>
+                    
+                    <form onSubmit={handleAuthAction} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            <label style={{ fontWeight: 'bold', fontSize: '14px' }}>Email Address</label>
+                            <input type="email" required placeholder="name@example.com" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            <label style={{ fontWeight: 'bold', fontSize: '14px' }}>Password</label>
+                            <input type="password" required placeholder="••••••••" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                        </div>
+                        <button type="submit" disabled={authLoading} style={{ background: '#007bff', color: 'white', padding: '12px', fontSize: '16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginTop: '10px' }}>
+                            {authLoading ? 'Connecting...' : isSignUp ? 'Sign Up' : 'Log In'}
+                        </button>
+                    </form>
+                    <p style={{ marginTop: '25px', textAlign: 'center', fontSize: '14px', color: '#666' }}>
+                        {isSignUp ? 'Already have an account?' : 'Need an account for your cards?'} {' '}
+                        <span onClick={() => setIsSignUp(!isSignUp)} style={{ color: '#007bff', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline' }}>
+                            {isSignUp ? 'Sign In Here' : 'Create One Here'}
+                        </span>
+                    </p>
                 </div>
-            )}
-        </div>
+            ) : (
+                /* 🔓 RENDER MAIN DASHBOARD VIEW IF USER IS LOGGED IN */
+                <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h1>Business Card Scanner</h1>
+                        <button onClick={() => supabase.auth.signOut()} style={{ background: '#6c757d', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                            Logout 🚪
+                        </button>
+                    </div>
 
         {/* Batch Review Section */}
         {pendingReviewCards.length > 0 && (
@@ -369,6 +416,8 @@ const handleRemovePendingCard = (id) => {
                 </table>
             </div>
         </div>
-    </div>
-);
+    </>
+)}
+        </div>
+    );
 }
