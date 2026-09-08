@@ -1,0 +1,17 @@
+name: Keep Supabase Database Awake
+
+on:
+  schedule:
+    # ⏰ Runs automatically every Tuesday and Friday at midnight UTC
+    - cron: '0 0 * * 2,5'
+  workflow_dispatch: # Allows you to trigger the ping manually from GitHub if you want
+
+jobs:
+  ping_supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send keep-alive request to Supabase API
+        run: |
+          curl -i -X GET "https://qqmquetwnogjndrmvlyj.supabase.co/rest/v1/" \
+          -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
