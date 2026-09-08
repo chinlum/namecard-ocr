@@ -94,18 +94,20 @@ button:hover {
 }
 
 .table-responsive {
-  overflow-x: auto;
+  max-height: 450px;       /* ↕️ Keeps the table section neat instead of stretching the screen */
+  overflow-y: auto;        /* 📜 Unlocks a smooth vertical scrollbar */
+  overflow-x: auto;        /* ↔️ Unlocks a clean side scrollbar for phone screens */
   margin-top: 20px;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border: 1px solid #ddd;  /* Draws a clean subtle frame border around the grid block */
+  border-radius: 6px;
+  background: white;
 }
 
-.cards-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: white;
-  min-width: 900px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+.cards-table th {
+  position: sticky;        /* 📌 Pins the header row firmly in place */
+  top: 0;                  /* Keeps it glued to the very top edge of the scroll box */
+  z-index: 2;              /* Guarantees card data text slides underneath it safely */
+  background: #007bff;     /* Prevents rows from showing through behind the title text */
 }
 
 .cards-table thead {
@@ -161,4 +163,23 @@ button:hover {
 }
 .delete-btn:hover {
   background: #c82333;
+}
+
+.search-section {
+  margin: 20px 0;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #007bff;
+  border-radius: 4px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #0056b3;
+  box-shadow: 0 0 5px rgba(0,87,179,0.3);
 }
