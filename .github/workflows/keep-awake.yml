@@ -12,6 +12,6 @@ jobs:
     steps:
       - name: Send keep-alive request to Supabase API
         run: |
-          curl -i -X GET "https://qqmquetwnogjndrmvlyj.supabase.co/rest/v1/" \
+          curl -i -X GET "https://qqmquetwnogjndrmvlyj.supabase.co/rest/v1/businesscards?select=id&limit=1" \
           -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
           -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
